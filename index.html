@@ -8,22 +8,6 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,700&family=Figtree:wght@400;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
-<<<<<<< HEAD
-=======
-  <audio id="bgMusic" loop>
-    <source src="./Audio/Audios.mpeg" type="audio/mpeg">
-</audio>
-
-<script>
-document.addEventListener("click", function() {
-    const music = document.getElementById("bgMusic");
-
-    if (music.paused) {
-        music.play();
-    }
-}, { once: true });
-</script>
->>>>>>> 6b3d7854cf4a59d3479ba8fe5978d885d027219b
 </head>
 <body>
   <audio id="bgMusic" loop>
@@ -111,6 +95,7 @@ document.addEventListener("click", function() {
         <button data-game="shooter" aria-pressed="true">Zombie shooter</button>
         <button data-game="jump" aria-pressed="false">Sky jump</button>
         <button data-game="run" aria-pressed="false">Night run</button>
+        <button data-game="snake" aria-pressed="false">Snake</button>
       </div>
 
       <form class="cheat" id="cheatForm" autocomplete="off">
@@ -120,7 +105,7 @@ document.addEventListener("click", function() {
       <p class="hint" id="cheatStatus" aria-live="polite"></p>
 
       <div data-panel="shooter">
-        <p class="hint">Walk anywhere with the pad, W A S D or the arrow keys (diagonals too). Aim with the mouse or your finger on the game and hold to shoot. With the FIRE button or Space the gun locks onto the nearest enemy. A boss appears every few hundred points and each one is tougher than the last. Walk into the glowing orbs it drops for buffs.</p>
+        <p class="hint">Left thumbstick walks in any direction (or use W A S D / arrow keys). Right thumbstick aims and shoots: push it where you want to fire. With a mouse, aim and hold to shoot. A boss appears every few hundred points and each one is tougher than the last. Walk into the glowing orbs it drops for buffs.</p>
         <div class="stage" data-stage="shooter">
           <div class="hud">
             <p>Score <strong id="zScore">0</strong></p>
@@ -132,18 +117,8 @@ document.addEventListener("click", function() {
           <div class="playfield">
             <canvas id="zCanvas" width="640" height="420" aria-label="Zombie shooter game"></canvas>
             <div class="pad pad-shooter">
-              <div class="dpad" role="group" aria-label="Move">
-                <button type="button" data-key="ArrowUp,ArrowLeft" aria-label="Up left">&#8598;</button>
-                <button type="button" data-key="ArrowUp" aria-label="Up">&#9650;</button>
-                <button type="button" data-key="ArrowUp,ArrowRight" aria-label="Up right">&#8599;</button>
-                <button type="button" data-key="ArrowLeft" aria-label="Left">&#9664;</button>
-                <span></span>
-                <button type="button" data-key="ArrowRight" aria-label="Right">&#9654;</button>
-                <button type="button" data-key="ArrowDown,ArrowLeft" aria-label="Down left">&#8601;</button>
-                <button type="button" data-key="ArrowDown" aria-label="Down">&#9660;</button>
-                <button type="button" data-key="ArrowDown,ArrowRight" aria-label="Down right">&#8600;</button>
-              </div>
-              <button type="button" class="act" data-key=" " aria-label="Fire">FIRE</button>
+              <div class="stick" data-stick="move" role="group" aria-label="Move thumbstick"><div class="knob"></div><span class="lbl">MOVE</span></div>
+              <div class="stick" data-stick="aim" role="group" aria-label="Aim and shoot thumbstick"><div class="knob"></div><span class="lbl">SHOOT</span></div>
             </div>
           </div>
           <p class="rotate-tip">Turn your phone sideways for the big screen</p>
@@ -184,6 +159,36 @@ document.addEventListener("click", function() {
             <canvas id="rCanvas" width="640" height="320" aria-label="Night run game"></canvas>
             <div class="pad pad-one">
               <button type="button" class="act wide" data-key="ArrowUp" aria-label="Jump">JUMP</button>
+            </div>
+          </div>
+          <p class="rotate-tip">Turn your phone sideways for the big screen</p>
+        </div>
+      </div>
+
+      <div data-panel="snake" hidden>
+        <p class="hint">You are the player you picked. Eat the other one to grow. Swipe on the game, use the arrow pad, or the arrow keys / W A S D. The walls wrap around, but don't bite your own body. It gets faster as you grow.</p>
+        <div class="stage" data-stage="snake">
+          <div class="hud">
+            <p>Score <strong id="sScore">0</strong></p>
+            <p>Best <strong id="sHigh">0</strong></p>
+            <p>Length <strong id="sLen">3</strong></p>
+            <button class="bigbtn ghost" type="button">Big screen</button>
+            <button id="sStart">Start</button>
+          </div>
+          <div class="playfield">
+            <canvas id="sCanvas" width="560" height="392" aria-label="Snake game"></canvas>
+            <div class="pad pad-snake">
+              <div class="dpad" role="group" aria-label="Steer">
+                <span></span>
+                <button type="button" data-key="ArrowUp" aria-label="Up">&#9650;</button>
+                <span></span>
+                <button type="button" data-key="ArrowLeft" aria-label="Left">&#9664;</button>
+                <span></span>
+                <button type="button" data-key="ArrowRight" aria-label="Right">&#9654;</button>
+                <span></span>
+                <button type="button" data-key="ArrowDown" aria-label="Down">&#9660;</button>
+                <span></span>
+              </div>
             </div>
           </div>
           <p class="rotate-tip">Turn your phone sideways for the big screen</p>

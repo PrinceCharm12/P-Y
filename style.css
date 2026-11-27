@@ -140,7 +140,7 @@ footer { text-align: center; color: var(--muted); padding: 2rem 1rem; }
   user-select: none;
   -webkit-touch-callout: none;
 }
-#zCanvas, #jCanvas, #rCanvas {
+#zCanvas, #jCanvas, #rCanvas, #sCanvas {
   display: block;
   width: 100%;
   height: auto;
@@ -277,42 +277,93 @@ button.ghost { background: transparent; color: var(--ink); border-color: var(--l
 .pad-two { justify-content: center; max-width: 380px; margin-left: auto; margin-right: auto; }
 .pad-shooter { padding: 0 .25rem; }
 
-/* ---- Big screen (landscape) ---- */
+/* ---- Thumbsticks ---- */
+.stick {
+  position: relative;
+  width: 8rem;
+  height: 8rem;
+  flex: none;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 255, 255, .10), rgba(255, 255, 255, .03) 70%);
+  border: 2px solid rgba(255, 255, 255, .28);
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+.stick .knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 3.4rem;
+  height: 3.4rem;
+  margin: -1.7rem 0 0 -1.7rem;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 3px solid rgba(255, 255, 255, .8);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .45);
+  pointer-events: none;
+}
+.stick[data-stick="aim"] .knob { background: var(--day); }
+.stick .lbl { position: absolute; left: 0; right: 0; bottom: -1.35rem; text-align: center; font-size: .72rem; letter-spacing: .1em; color: var(--muted); pointer-events: none; }
+.stick.on { border-color: var(--accent); }
+.pad-shooter { padding: 0 .75rem 1.4rem; }
+.pad-snake { justify-content: center; }
+
+/* ---- Big screen: the game fills the whole screen, small menu buttons, full-size controls ---- */
 body.noscroll { overflow: hidden; }
 .rotate-tip { display: none; margin: 0; text-align: center; color: var(--muted); font-size: .9rem; }
 .stage.big {
   position: fixed;
   inset: 0;
   z-index: 80;
-  display: flex;
-  flex-direction: column;
-  padding: .5rem .75rem;
   background: #0a0b1e;
   overflow: hidden;
 }
-.stage.big .hud { flex: none; margin-bottom: .4rem; }
-.stage.big .hud .bigbtn { margin-left: auto; }
-.stage.big .playfield { position: relative; flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
-.stage.big canvas { width: auto; height: auto; max-width: none !important; margin: 0; }
+.stage.big .playfield { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+.stage.big canvas { display: block; width: auto; height: auto; max-width: none !important; margin: 0; border-radius: 0; border: 0; }
+.stage.big .hud {
+  position: absolute;
+  top: .35rem;
+  left: .5rem;
+  z-index: 5;
+  margin: 0;
+  gap: .55rem;
+  flex-wrap: nowrap;
+  padding: .15rem .45rem;
+  border-radius: 999px;
+  background: rgba(10, 11, 30, .62);
+  font-size: .72rem;
+}
+.stage.big .hud p { white-space: nowrap; }
+.stage.big .hud strong { font-size: .9rem; }
+.stage.big .hud button { margin: 0; padding: .1rem .55rem; font-size: .7rem; border-radius: 999px; }
 .stage.big .pad {
   position: absolute;
   inset: 0;
+  z-index: 4;
   margin: 0;
-  padding: .25rem .5rem;
+  padding: 0 1rem 1.2rem;
   max-width: none;
   align-items: flex-end;
   pointer-events: none;
 }
-.stage.big .pad button { pointer-events: auto; opacity: .62; }
+.stage.big .pad > * { pointer-events: auto; }
+.stage.big .stick { width: 9.5rem; height: 9.5rem; opacity: .75; }
+.stage.big .stick .knob { width: 4rem; height: 4rem; margin: -2rem 0 0 -2rem; }
+.stage.big .pad button { opacity: .65; }
 .stage.big .pad button.on { opacity: 1; }
 .stage.big .pad-two { justify-content: space-between; }
 .stage.big .pad-two .act { width: 6.5rem; height: 6.5rem; max-width: none; border-radius: 50%; }
 .stage.big .pad-one { justify-content: flex-end; }
 .stage.big .act.wide { width: 8rem; height: 8rem; max-width: none; border-radius: 50%; margin: 0; }
-.stage.big .act { width: 6.5rem; height: 6.5rem; }
-@media (orientation: portrait) { .stage.big .rotate-tip { display: block; padding-top: .4rem; } }
+.stage.big .pad-snake { justify-content: flex-end; }
+@media (orientation: portrait) { .stage.big .rotate-tip { display: block; position: absolute; bottom: .5rem; left: 0; right: 0; z-index: 6; } }
 @media (orientation: landscape) and (max-height: 520px) {
-  .stage.big .dpad { grid-template-columns: repeat(3, 2.8rem); grid-template-rows: repeat(3, 2.8rem); }
-  .stage.big .act, .stage.big .pad-two .act, .stage.big .act.wide { width: 5rem; height: 5rem; }
-  .stage.big .hud strong { font-size: 1.1rem; }
+  .stage.big .stick { width: 7.5rem; height: 7.5rem; }
+  .stage.big .stick .knob { width: 3.2rem; height: 3.2rem; margin: -1.6rem 0 0 -1.6rem; }
+  .stage.big .dpad { grid-template-columns: repeat(3, 2.9rem); grid-template-rows: repeat(3, 2.9rem); }
+  .stage.big .pad-two .act { width: 5.5rem; height: 5.5rem; }
+  .stage.big .act.wide { width: 6.5rem; height: 6.5rem; }
+  .stage.big .pad { padding-bottom: .8rem; }
 }

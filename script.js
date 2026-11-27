@@ -350,6 +350,8 @@ const games = {};   // each game registers a stop() here so switching games paus
 
 // The player can't be changed while a game is running
 const charButtons = [];
+// Virtual thumbsticks (values from -1 to 1). "aim" also fires while it is pushed.
+const sticks = { move: { x: 0, y: 0 }, aim: { x: 0, y: 0, on: false } };
 function anyPlaying() { return Object.values(games).some((g) => g.isPlaying && g.isPlaying()); }
 function refreshCharLock() {
   const locked = anyPlaying();
@@ -384,8 +386,8 @@ try {
 
 function redrawGames() { Object.values(games).forEach((g) => g.redraw && g.redraw()); }
 
-function drawChar(ctx, x, y, r) {
-  const c = chars[charIndex];
+function drawChar(ctx, x, y, r, who) {
+  const c = who || chars[charIndex];
   ctx.save();
   ctx.beginPath();
   ctx.arc(x, y, r, 0, Math.PI * 2);
@@ -936,21 +938,23 @@ updateCheatStatus();
     fireCooldown -= dt;
     hurt = Math.max(0, hurt - dt);
 
-    // Walk in any direction (WASD, arrow keys or the on-screen pad), diagonals included
-    let mx = (keys.right ? 1 : 0) - (keys.left ? 1 : 0);
-    let my = (keys.down ? 1 : 0) - (keys.up ? 1 : 0);
-    if (mx || my) {
-      const len = Math.hypot(mx, my);
-      mx /= len; my /= len;
-      player.x = Math.max(player.r, Math.min(W - player.r, player.x + mx * PLAYER_SPEED * dt));
-      player.y = Math.max(player.r, Math.min(H - player.r, player.y + my * PLAYER_SPEED * dt));
+    // Walk in any direction: left thumbstick, WASD, arrow keys (diagonals included)
+    let mx = (keys.right ? 1 : 0) - (keys.left ? 1 : 0) + sticks.move.x;
+    let my = (keys.down ? 1 : 0) - (keys.up ? 1 : 0) + sticks.move.y;
+    const len = Math.hypot(mx, my);
+    if (len > 0.01) {
+      const power = Math.min(1, len);
+      player.x = Math.max(player.r, Math.min(W - player.r, player.x + (mx / len) * PLAYER_SPEED * power * dt));
+      player.y = Math.max(player.r, Math.min(H - player.r, player.y + (my / len) * PLAYER_SPEED * power * dt));
       lastMove = Math.atan2(my, mx);
     }
+    // Right thumbstick: point where you want to shoot, it fires while pushed
+    if (sticks.aim.on) { aim = Math.atan2(sticks.aim.y, sticks.aim.x); autoAim = false; }
     if (autoAim) {
       const t = nearestTarget();
       aim = t ? Math.atan2(t.y - player.y, t.x - player.x) : lastMove;
     }
-    if (holding || keys.fire) shoot();
+    if (holding || keys.fire || sticks.aim.on) shoot();
 
     spawnTimer -= dt * enemySlow();
     if (spawnTimer <= 0) {
@@ -1956,7 +1960,199 @@ updateCheatStatus();
 })();
 
 // ============================================================
-// Game picker: switch between the three games
+// Snake: you are the player you picked, and you eat the other one
+// ============================================================
+(function () {
+  const canvas = $("sCanvas");
+  const ctx = canvas.getContext("2d");
+  const W = canvas.width, H = canvas.height;
+  const CELL = 28, COLS = W / CELL, ROWS = H / CELL;
+  const KEY = "snake-highscore";
+  const scoreEl = $("sScore"), highEl = $("sHigh"), lenEl = $("sLen"), startBtn = $("sStart");
+  const buffs = makeBuffs([]);          // keeps the SLOWED cheat timer running
+
+  let high = loadHigh(KEY);
+  let state = "idle", overAt = 0, lastTime = 0, newBest = false, acc = 0, score = 0;
+  let snake = [], dir = { x: 1, y: 0 }, queue = [], food = { x: 0, y: 0 }, eatFlash = 0;
+
+  const eaten = () => chars[(charIndex + 1) % chars.length];   // the character you did NOT choose
+
+  function updateHud() {
+    scoreEl.textContent = score;
+    highEl.textContent = high;
+    lenEl.textContent = snake.length;
+  }
+
+  function placeFood() {
+    const free = [];
+    for (let x = 0; x < COLS; x++) for (let y = 0; y < ROWS; y++) if (!snake.some((s) => s.x === x && s.y === y)) free.push({ x, y });
+    food = free.length ? free[Math.floor(Math.random() * free.length)] : { x: 0, y: 0 };
+  }
+
+  function reset() {
+    const cy = Math.floor(ROWS / 2);
+    snake = [{ x: 6, y: cy }, { x: 5, y: cy }, { x: 4, y: cy }];
+    dir = { x: 1, y: 0 };
+    queue = [];
+    score = 0; acc = 0; eatFlash = 0; newBest = false;
+    buffs.clear();
+    placeFood();
+    updateHud();
+  }
+
+  function start() {
+    if (state === "playing") resetCheats();
+    reset();
+    state = "playing";
+    startBtn.blur();
+    startBtn.textContent = "Restart";
+    refreshCharLock();
+    lastTime = performance.now();
+    requestAnimationFrame(loop);
+  }
+
+  function endGame() {
+    state = "over";
+    buffs.clear();
+    if (!quietEnd) resetCheats();
+    overAt = performance.now();
+    if (score > high) { high = score; newBest = true; saveHigh(KEY, high); }
+    updateHud();
+    startBtn.textContent = "Play again";
+    refreshCharLock();
+  }
+
+  function setDir(d) {
+    const ref = queue.length ? queue[queue.length - 1] : dir;
+    if ((d.x === -ref.x && d.y === -ref.y) || (d.x === ref.x && d.y === ref.y)) return;
+    if (queue.length < 2) queue.push(d);
+  }
+
+  function step() {
+    if (queue.length) dir = queue.shift();
+    const head = snake[0];
+    const nx = (head.x + dir.x + COLS) % COLS;     // the walls wrap around
+    const ny = (head.y + dir.y + ROWS) % ROWS;
+    const eating = nx === food.x && ny === food.y;
+    const body = eating ? snake : snake.slice(0, -1);
+    if (body.some((s) => s.x === nx && s.y === ny) && !cheats.ghost && !cheats.immortal) { endGame(); return; }
+    snake.unshift({ x: nx, y: ny });
+    if (eating) {
+      score += 10 * mult();
+      eatFlash = 0.25;
+      placeFood();
+      updateHud();
+    } else {
+      snake.pop();
+    }
+  }
+
+  function update(dt) {
+    buffs.tick(dt);
+    eatFlash = Math.max(0, eatFlash - dt);
+    const interval = Math.max(0.075, 0.17 - snake.length * 0.0022) / enemySlow();
+    acc += dt;
+    while (acc >= interval && state === "playing") { acc -= interval; step(); }
+  }
+
+  const cx = (g) => g.x * CELL + CELL / 2;
+  const cy = (g) => g.y * CELL + CELL / 2;
+
+  function draw() {
+    ctx.fillStyle = "#0d0e24";
+    ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = "rgba(124,130,200,.07)";
+    ctx.lineWidth = 1;
+    for (let x = 0; x <= W; x += CELL) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+    for (let y = 0; y <= H; y += CELL) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+
+    const me = chars[charIndex], prey = eaten();
+
+    // The one being eaten
+    const pulse = 1 + Math.sin(performance.now() / 180) * 0.07;
+    ctx.save();
+    ctx.shadowColor = prey.color === "#000000" ? "#ffffff" : prey.color;
+    ctx.shadowBlur = 14;
+    drawChar(ctx, cx(food), cy(food), CELL * 0.62 * pulse, prey);
+    ctx.restore();
+
+    // Body: a thick line in your colour with round segments
+    ctx.save();
+    if (cheats.ghost) ctx.globalAlpha = 0.5;
+    const bodyColor = me.color === "#000000" ? "#2b2d4f" : me.color;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    for (let i = snake.length - 1; i > 0; i--) {
+      const a = snake[i], b = snake[i - 1];
+      if (Math.abs(a.x - b.x) > 1 || Math.abs(a.y - b.y) > 1) continue;   // do not draw across a wrap
+      ctx.strokeStyle = "rgba(255,255,255,.85)";
+      ctx.lineWidth = CELL * 0.62 + 4;
+      ctx.beginPath(); ctx.moveTo(cx(a), cy(a)); ctx.lineTo(cx(b), cy(b)); ctx.stroke();
+    }
+    for (let i = snake.length - 1; i > 0; i--) {
+      const a = snake[i], b = snake[i - 1];
+      if (Math.abs(a.x - b.x) > 1 || Math.abs(a.y - b.y) > 1) continue;
+      ctx.strokeStyle = bodyColor;
+      ctx.lineWidth = CELL * 0.62;
+      ctx.beginPath(); ctx.moveTo(cx(a), cy(a)); ctx.lineTo(cx(b), cy(b)); ctx.stroke();
+    }
+    // Head: your photo, a little bigger when it just ate
+    drawChar(ctx, cx(snake[0]), cy(snake[0]), CELL * (0.66 + eatFlash * 0.5), me);
+    ctx.restore();
+
+    if (state === "idle") {
+      overlayOn(ctx, W, H, "Snake", [`You are ${me.name}. Eat ${prey.name} to grow.`, "Swipe, use the pad or the arrow keys.", high ? `Best: ${high}` : ""]);
+    } else if (state === "over") {
+      overlayOn(ctx, W, H, "Game over", [`Score: ${score}`, newBest ? "New best score!" : `Best: ${high}`, "Tap to play again"]);
+    }
+  }
+
+  function loop(now) {
+    if (state !== "playing") return;
+    const dt = Math.min(0.05, (now - lastTime) / 1000);
+    lastTime = now;
+    update(dt);
+    draw();
+    if (state === "playing") requestAnimationFrame(loop);
+  }
+
+  // ---- Input: swipe on the game, the pad buttons, or the keyboard ----
+  let sx = 0, sy = 0, swiping = false;
+  canvas.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    if (state !== "playing") { if (performance.now() - overAt > 600) start(); return; }
+    canvas.setPointerCapture(e.pointerId);
+    const p = pointerXY(canvas, e);
+    sx = p.x; sy = p.y; swiping = true;
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    if (!swiping || state !== "playing") return;
+    const p = pointerXY(canvas, e);
+    const dx = p.x - sx, dy = p.y - sy;
+    if (Math.hypot(dx, dy) > 28) {
+      setDir(Math.abs(dx) > Math.abs(dy) ? { x: Math.sign(dx), y: 0 } : { x: 0, y: Math.sign(dy) });
+      sx = p.x; sy = p.y;
+    }
+  });
+  ["pointerup", "pointercancel", "lostpointercapture"].forEach((t) => canvas.addEventListener(t, () => { swiping = false; }));
+
+  const DIRS = { arrowleft: { x: -1, y: 0 }, a: { x: -1, y: 0 }, arrowright: { x: 1, y: 0 }, d: { x: 1, y: 0 }, arrowup: { x: 0, y: -1 }, w: { x: 0, y: -1 }, arrowdown: { x: 0, y: 1 }, s: { x: 0, y: 1 } };
+  window.addEventListener("keydown", (e) => {
+    if (state !== "playing" || !modal.hidden) return;
+    const d = DIRS[e.key.toLowerCase()];
+    if (!d) return;
+    e.preventDefault();
+    setDir(d);
+  });
+
+  games.snake = { isPlaying: () => state === "playing", redraw: draw, stop() { if (state === "playing") { quietEnd = true; endGame(); quietEnd = false; draw(); } } };
+  startBtn.onclick = start;
+  reset();
+  draw();
+})();
+
+// ============================================================
+// Game picker: switch between the four games
 // ============================================================
 const gameTabs = document.querySelectorAll("[data-game]");
 function showGame(name) {
@@ -2035,52 +2231,106 @@ document.querySelectorAll("[data-key]").forEach((b) => {
 });
 
 // ============================================================
-// Big screen: fills the screen in landscape (falls back to a full-page view where fullscreen is blocked, e.g. iPhone)
+// Thumbsticks (shooter): drag the knob, the game reads sticks.move / sticks.aim
+// ============================================================
+document.querySelectorAll("[data-stick]").forEach((base) => {
+  const knob = base.querySelector(".knob"), kind = base.dataset.stick, out = sticks[kind];
+  let id = null;
+  function setVec(e) {
+    const r = base.getBoundingClientRect(), R = r.width / 2;
+    let dx = e.clientX - (r.left + R), dy = e.clientY - (r.top + R);
+    const d = Math.hypot(dx, dy);
+    if (d > R) { dx *= R / d; dy *= R / d; }
+    knob.style.transform = `translate(${dx}px, ${dy}px)`;
+    let vx = dx / R, vy = dy / R;
+    const m = Math.hypot(vx, vy);
+    if (m < 0.18) { vx = 0; vy = 0; }
+    out.x = vx; out.y = vy;
+    if (kind === "aim") out.on = m >= 0.25;
+  }
+  function end(e) {
+    if (e.pointerId !== id) return;
+    id = null;
+    out.x = 0; out.y = 0;
+    if (kind === "aim") out.on = false;
+    knob.style.transform = "";
+    base.classList.remove("on");
+  }
+  base.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    if (id !== null) return;
+    id = e.pointerId;
+    base.setPointerCapture(id);
+    base.classList.add("on");
+    setVec(e);
+  });
+  base.addEventListener("pointermove", (e) => { if (e.pointerId === id) setVec(e); });
+  ["pointerup", "pointercancel", "lostpointercapture"].forEach((t) => base.addEventListener(t, end));
+  base.addEventListener("contextmenu", (e) => e.preventDefault());
+});
+
+// ============================================================
+// Big screen: the game fills the whole screen. Fullscreen + landscape lock where the browser allows it,
+// otherwise a full-page view (iPhone). A phone turned sideways switches to it by itself.
 // ============================================================
 (function () {
-  const stages = document.querySelectorAll(".stage");
+  const stages = Array.from(document.querySelectorAll(".stage"));
 
   function fit(stage) {
-    const pf = stage.querySelector(".playfield"), cv = stage.querySelector("canvas");
+    const cv = stage.querySelector("canvas");
     if (!stage.classList.contains("big")) { cv.style.width = cv.style.height = ""; return; }
-    const r = pf.getBoundingClientRect();
-    const ar = cv.width / cv.height;
-    let w = r.width, h = w / ar;
-    if (h > r.height) { h = r.height; w = h * ar; }
+    const W0 = stage.clientWidth, H0 = stage.clientHeight, ar = cv.width / cv.height;
+    let w = W0, h = w / ar;
+    if (h > H0) { h = H0; w = h * ar; }
     cv.style.width = Math.floor(w) + "px";
     cv.style.height = Math.floor(h) + "px";
   }
-  const fitAll = () => stages.forEach(fit);
-  ["resize", "orientationchange", "fullscreenchange", "webkitfullscreenchange"].forEach((t) => window.addEventListener(t, () => { fitAll(); setTimeout(fitAll, 200); }));
+  const fitAll = () => { stages.forEach(fit); setTimeout(() => stages.forEach(fit), 250); };
+  ["resize", "orientationchange", "fullscreenchange", "webkitfullscreenchange"].forEach((t) => window.addEventListener(t, fitAll));
+
+  function open(stage, withFullscreen) {
+    stage.classList.add("big");
+    document.body.classList.add("noscroll");
+    stage.querySelector(".bigbtn").textContent = "Exit";
+    fitAll();
+    if (!withFullscreen) return;
+    const req = stage.requestFullscreen || stage.webkitRequestFullscreen;
+    if (req) {
+      Promise.resolve(req.call(stage, { navigationUI: "hide" })).then(() => {
+        try { return screen.orientation.lock("landscape"); } catch (e) {}
+      }).catch(() => {}).then(fitAll);
+    }
+  }
+
+  function close(stage) {
+    stage.classList.remove("big");
+    stage._auto = false;
+    if (!stages.some((s) => s.classList.contains("big"))) document.body.classList.remove("noscroll");
+    stage.querySelector(".bigbtn").textContent = "Big screen";
+    try { screen.orientation.unlock(); } catch (e) {}
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    fitAll();
+  }
 
   stages.forEach((stage) => {
-    const btn = stage.querySelector(".bigbtn");
-
-    async function enter() {
-      stage.classList.add("big");
-      document.body.classList.add("noscroll");
-      btn.textContent = "Exit big screen";
-      try {
-        if (stage.requestFullscreen) await stage.requestFullscreen({ navigationUI: "hide" });
-        else if (stage.webkitRequestFullscreen) stage.webkitRequestFullscreen();
-      } catch (e) { /* the full-page view still works */ }
-      try { await screen.orientation.lock("landscape"); } catch (e) { /* not supported: the rotate tip shows instead */ }
-      fitAll(); setTimeout(fitAll, 200);
-    }
-
-    function exit() {
-      stage.classList.remove("big");
-      document.body.classList.remove("noscroll");
-      btn.textContent = "Big screen";
-      try { screen.orientation.unlock(); } catch (e) {}
-      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
-      fitAll();
-    }
-
-    btn.onclick = () => (stage.classList.contains("big") ? exit() : enter());
-    document.addEventListener("fullscreenchange", () => {
-      if (!document.fullscreenElement && stage.classList.contains("big")) exit();   // Esc / system back
-    });
-    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && stage.classList.contains("big")) exit(); });
+    stage.querySelector(".bigbtn").onclick = () => (stage.classList.contains("big") ? close(stage) : open(stage, true));
   });
+  document.addEventListener("fullscreenchange", () => {
+    if (!document.fullscreenElement) stages.forEach((s) => { if (s.classList.contains("big") && !s._auto) close(s); });
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") stages.forEach((s) => { if (s.classList.contains("big")) close(s); });
+  });
+
+  // Phone turned sideways: go big by itself. Turned back: go back.
+  const sideways = window.matchMedia("(orientation: landscape) and (pointer: coarse) and (max-height: 520px)");
+  function onTurn() {
+    const shown = stages.find((s) => !s.closest("[data-panel]").hidden);
+    if (sideways.matches) {
+      if (shown && !shown.classList.contains("big")) { shown._auto = true; open(shown, false); }
+    } else {
+      stages.forEach((s) => { if (s._auto && s.classList.contains("big")) close(s); });
+    }
+  }
+  (sideways.addEventListener ? sideways.addEventListener("change", onTurn) : sideways.addListener(onTurn));
 })();
