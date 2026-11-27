@@ -348,6 +348,16 @@ setInterval(updateCounters, 60000);
 // ============================================================
 const games = {};   // each game registers a stop() here so switching games pauses the old one
 
+// The player can't be changed while a game is running
+const charButtons = [];
+function anyPlaying() { return Object.values(games).some((g) => g.isPlaying && g.isPlaying()); }
+function refreshCharLock() {
+  const locked = anyPlaying();
+  charButtons.forEach((b) => { b.classList.toggle("locked", locked); b.setAttribute("aria-disabled", String(locked)); });
+  const h = $("charHint");
+  if (h) h.textContent = locked ? "Player locked while you play. You can change it after the game ends." : "Choose your player";
+}
+
 function loadHigh(key) { try { return Number(localStorage.getItem(key)) || 0; } catch (e) { return 0; } }
 function saveHigh(key, v) { try { localStorage.setItem(key, String(v)); } catch (e) {} }
 function loadImg(src, onReady) {
@@ -648,6 +658,9 @@ updateCheatStatus();
   let bullets = [], zombies = [], particles = [];
   let score = 0, lives = 3, spawnTimer = 0, elapsed = 0, lastTime = 0;
   let aim = -Math.PI / 2, fireCooldown = 0, holding = false, hurt = 0, newBest = false;
+  const PLAYER_SPEED = 230;            // pixels per second, in any direction
+  let lastMove = -Math.PI / 2;         // direction you last walked
+  let autoAim = true;                  // true = gun picks the nearest enemy (keyboard / buttons); false = follows the mouse or finger
   const keys = {};
   const buffs = makeBuffs(["rapid", "spread", "shield"]);
   let pickups = [], pickupT = 0;
@@ -699,6 +712,7 @@ updateCheatStatus();
     state = "playing";
     startBtn.blur();   // so Space does not press the button again
     startBtn.textContent = "Restart";
+    refreshCharLock();
     lastTime = performance.now();
     requestAnimationFrame(loop);
   }
@@ -716,6 +730,7 @@ updateCheatStatus();
     }
     updateHud();
     startBtn.textContent = "Play again";
+    refreshCharLock();
   }
 
   function spawnZombie() {
@@ -909,13 +924,32 @@ updateCheatStatus();
     });
   }
 
+  function nearestTarget() {
+    let best = null, bd = Infinity;
+    const all = boss ? zombies.concat([boss]) : zombies;
+    all.forEach((z) => { const d = Math.hypot(z.x - player.x, z.y - player.y); if (d < bd) { bd = d; best = z; } });
+    return best;
+  }
+
   function update(dt) {
     elapsed += dt;
     fireCooldown -= dt;
     hurt = Math.max(0, hurt - dt);
 
-    if (keys.left) aim -= 3.6 * dt;
-    if (keys.right) aim += 3.6 * dt;
+    // Walk in any direction (WASD, arrow keys or the on-screen pad), diagonals included
+    let mx = (keys.right ? 1 : 0) - (keys.left ? 1 : 0);
+    let my = (keys.down ? 1 : 0) - (keys.up ? 1 : 0);
+    if (mx || my) {
+      const len = Math.hypot(mx, my);
+      mx /= len; my /= len;
+      player.x = Math.max(player.r, Math.min(W - player.r, player.x + mx * PLAYER_SPEED * dt));
+      player.y = Math.max(player.r, Math.min(H - player.r, player.y + my * PLAYER_SPEED * dt));
+      lastMove = Math.atan2(my, mx);
+    }
+    if (autoAim) {
+      const t = nearestTarget();
+      aim = t ? Math.atan2(t.y - player.y, t.x - player.x) : lastMove;
+    }
     if (holding || keys.fire) shoot();
 
     spawnTimer -= dt * enemySlow();
@@ -1092,6 +1126,7 @@ updateCheatStatus();
     const x = (e.clientX - r.left) * (W / r.width);
     const y = (e.clientY - r.top) * (H / r.height);
     aim = Math.atan2(y - player.y, x - player.x);
+    autoAim = false;                    // mouse / finger takes over the aiming
   }
   canvas.addEventListener("pointerdown", (e) => {
     if (state !== "playing") { if (performance.now() - overAt > 600) start(); return; }
@@ -1108,7 +1143,9 @@ updateCheatStatus();
     const k = e.key.toLowerCase();
     if (k === "arrowleft" || k === "a") keys.left = true;
     else if (k === "arrowright" || k === "d") keys.right = true;
-    else if (k === " ") keys.fire = true;
+    else if (k === "arrowup" || k === "w") keys.up = true;
+    else if (k === "arrowdown" || k === "s") keys.down = true;
+    else if (k === " ") { keys.fire = true; autoAim = true; }
     else return;
     e.preventDefault();
   });
@@ -1116,11 +1153,13 @@ updateCheatStatus();
     const k = e.key.toLowerCase();
     if (k === "arrowleft" || k === "a") keys.left = false;
     else if (k === "arrowright" || k === "d") keys.right = false;
+    else if (k === "arrowup" || k === "w") keys.up = false;
+    else if (k === "arrowdown" || k === "s") keys.down = false;
     else if (k === " ") keys.fire = false;
   });
-  window.addEventListener("blur", () => { holding = false; keys.left = keys.right = keys.fire = false; });
+  window.addEventListener("blur", () => { holding = false; keys.left = keys.right = keys.up = keys.down = keys.fire = false; });
 
-  games.shooter = { redraw: draw, onCheat(k, on) { if (k === "allbuff" && on && state === "playing") { lives = Math.max(lives, 5); updateHud(); } }, stop() { if (state === "playing") { quietEnd = true; endGame(); quietEnd = false; draw(); } } };
+  games.shooter = { isPlaying: () => state === "playing", redraw: draw, onCheat(k, on) { if (k === "allbuff" && on && state === "playing") { lives = Math.max(lives, 5); updateHud(); } }, stop() { if (state === "playing") { quietEnd = true; endGame(); quietEnd = false; draw(); } } };
   startBtn.onclick = start;
   reset();
   draw();
@@ -1202,6 +1241,7 @@ updateCheatStatus();
     state = "playing";
     startBtn.blur();   // so Space does not press the button again
     startBtn.textContent = "Restart";
+    refreshCharLock();
     lastTime = performance.now();
     requestAnimationFrame(loop);
   }
@@ -1215,6 +1255,7 @@ updateCheatStatus();
     if (h > high) { high = h; newBest = true; saveHigh(KEY, high); }
     updateHud(true);
     startBtn.textContent = "Play again";
+    refreshCharLock();
   }
 
   function update(dt) {
@@ -1532,7 +1573,7 @@ updateCheatStatus();
   });
   window.addEventListener("blur", () => { keys.left = keys.right = false; });
 
-  games.jump = { redraw: draw, onCheat(k, on) { if (k === "allbuff" && on && state === "playing" && boss) { lives = Math.max(lives, 5); updateHud(true); } }, stop() { if (state === "playing") { quietEnd = true; endGame(); quietEnd = false; draw(); } } };
+  games.jump = { isPlaying: () => state === "playing", redraw: draw, onCheat(k, on) { if (k === "allbuff" && on && state === "playing" && boss) { lives = Math.max(lives, 5); updateHud(true); } }, stop() { if (state === "playing") { quietEnd = true; endGame(); quietEnd = false; draw(); } } };
   startBtn.onclick = start;
   reset();
   draw();
@@ -1584,6 +1625,7 @@ updateCheatStatus();
     state = "playing";
     startBtn.blur();   // so Space does not press the button again
     startBtn.textContent = "Restart";
+    refreshCharLock();
     lastTime = performance.now();
     requestAnimationFrame(loop);
   }
@@ -1597,6 +1639,7 @@ updateCheatStatus();
     if (score() > high) { high = score(); newBest = true; saveHigh(KEY, high); }
     updateHud(true);
     startBtn.textContent = "Play again";
+    refreshCharLock();
   }
 
   function spawn() {
@@ -1906,7 +1949,7 @@ updateCheatStatus();
   window.addEventListener("keyup", (e) => { if (isJumpKey(e.key.toLowerCase())) release(); });
   window.addEventListener("blur", release);
 
-  games.run = { redraw: draw, stop() { if (state === "playing") { quietEnd = true; endGame(); quietEnd = false; draw(); } } };
+  games.run = { isPlaying: () => state === "playing", redraw: draw, stop() { if (state === "playing") { quietEnd = true; endGame(); quietEnd = false; draw(); } } };
   startBtn.onclick = start;
   reset();
   draw();
@@ -1929,9 +1972,10 @@ showGame("shooter");
 // ============================================================
 (function () {
   const box = $("chars");
-  const buttons = [];
+  const buttons = charButtons;
 
   function select(i) {
+    if (anyPlaying()) return;
     charIndex = i;
     try { localStorage.setItem("character", String(i)); } catch (e) {}
     buttons.forEach((b, j) => b.setAttribute("aria-pressed", String(j === i)));
@@ -1964,11 +2008,79 @@ showGame("shooter");
 
     b.append(face, text);
     b.onclick = () => {
+      if (anyPlaying()) { b.blur(); showToast("Player is locked while you play"); return; }
       select(i);                        // the games read the choice every frame, so it changes mid-game
       b.blur();                         // keep keyboard focus off the button so Space / Enter go to the game
       showToast(`Playing as ${c.name}`);
     };
     box.append(b);
     buttons.push(b);
+  });
+})();
+
+// ============================================================
+// On-screen buttons: they press the same keys as the keyboard
+// data-key can hold several keys (the diagonal buttons use two)
+// ============================================================
+document.querySelectorAll("[data-key]").forEach((b) => {
+  const ks = b.dataset.key.split(",");
+  let down = false;
+  const send = (type) => ks.forEach((k) => window.dispatchEvent(new KeyboardEvent(type, { key: k, bubbles: true, cancelable: true })));
+  const press = (e) => { e.preventDefault(); if (down) return; down = true; b.classList.add("on"); send("keydown"); };
+  const lift = () => { if (!down) return; down = false; b.classList.remove("on"); send("keyup"); };
+  b.addEventListener("pointerdown", press);
+  ["pointerup", "pointercancel", "pointerleave", "lostpointercapture"].forEach((t) => b.addEventListener(t, lift));
+  b.addEventListener("contextmenu", (e) => e.preventDefault());
+  window.addEventListener("blur", lift);
+});
+
+// ============================================================
+// Big screen: fills the screen in landscape (falls back to a full-page view where fullscreen is blocked, e.g. iPhone)
+// ============================================================
+(function () {
+  const stages = document.querySelectorAll(".stage");
+
+  function fit(stage) {
+    const pf = stage.querySelector(".playfield"), cv = stage.querySelector("canvas");
+    if (!stage.classList.contains("big")) { cv.style.width = cv.style.height = ""; return; }
+    const r = pf.getBoundingClientRect();
+    const ar = cv.width / cv.height;
+    let w = r.width, h = w / ar;
+    if (h > r.height) { h = r.height; w = h * ar; }
+    cv.style.width = Math.floor(w) + "px";
+    cv.style.height = Math.floor(h) + "px";
+  }
+  const fitAll = () => stages.forEach(fit);
+  ["resize", "orientationchange", "fullscreenchange", "webkitfullscreenchange"].forEach((t) => window.addEventListener(t, () => { fitAll(); setTimeout(fitAll, 200); }));
+
+  stages.forEach((stage) => {
+    const btn = stage.querySelector(".bigbtn");
+
+    async function enter() {
+      stage.classList.add("big");
+      document.body.classList.add("noscroll");
+      btn.textContent = "Exit big screen";
+      try {
+        if (stage.requestFullscreen) await stage.requestFullscreen({ navigationUI: "hide" });
+        else if (stage.webkitRequestFullscreen) stage.webkitRequestFullscreen();
+      } catch (e) { /* the full-page view still works */ }
+      try { await screen.orientation.lock("landscape"); } catch (e) { /* not supported: the rotate tip shows instead */ }
+      fitAll(); setTimeout(fitAll, 200);
+    }
+
+    function exit() {
+      stage.classList.remove("big");
+      document.body.classList.remove("noscroll");
+      btn.textContent = "Big screen";
+      try { screen.orientation.unlock(); } catch (e) {}
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+      fitAll();
+    }
+
+    btn.onclick = () => (stage.classList.contains("big") ? exit() : enter());
+    document.addEventListener("fullscreenchange", () => {
+      if (!document.fullscreenElement && stage.classList.contains("big")) exit();   // Esc / system back
+    });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && stage.classList.contains("big")) exit(); });
   });
 })();
